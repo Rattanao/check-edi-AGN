@@ -1,0 +1,11 @@
+# ข้อมูลลูกค้าจริง (MANIFEST/ENTER/EDI ที่สร้างขึ้น) ห้ามขึ้น GitHub
+input/
+*.xls
+*.xlsx
+!references/*.xlsx
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
