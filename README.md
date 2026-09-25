@@ -83,3 +83,16 @@ python scripts/build_edi.py --manifest input/MANIFEST.xls --enter input/ENTER.pd
 
 รูปแบบรายงานนี้ปรับจากการใช้งานจริงหลายครั้งกับหลายสายเรือ/ลูกค้า — สี, ลำดับคอลัมน์,
 และกฎการตัดสินแต่ละจุดเป็นข้อตกลงที่ยืนยันแล้ว ไม่ใช่ค่าที่เดาเอง
+
+## ใช้งานผ่านเว็บ (ในเครื่อง/วงแลน)
+
+```bash
+pip install -r requirements.txt
+python webapp/app.py
+```
+
+เปิด http://localhost:5000 (เครื่องอื่นในวงแลนเปิด `http://<IP เครื่องนี้>:5000`) → เลือกไฟล์ MANIFEST + ENTER
+ใส่ SHED NO. แล้วกด **ตรวจสอบ** จะเห็นสรุปจุดผิด + ตารางสีเหมือน EDI.xlsx และปุ่มดาวน์โหลด EDI.xlsx
+
+SHED NO.: ทุก B/L ต้องตรงกับเลขที่ใส่ (ตรง = `-`) ยกเว้น LAOS ใช้กฎเดิม 0124
+(บรรทัดคำสั่ง: `python scripts/build_edi.py --shed 0141`)

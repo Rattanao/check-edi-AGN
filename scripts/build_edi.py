@@ -104,13 +104,21 @@ def find_dest_country(txt):
     return ''
 
 
+# SHED NO. ที่ผู้ใช้แจ้งมาตอนสั่งตรวจ (--shed เช่น 0141) — ถ้ามีค่า ทุก B/L ต้องตรงกับเลขนี้ ยกเว้น LAOS
+# ที่ยังใช้กฎเดิม (0124 เมื่อ DISCHARGE BANGKOK). ถ้าไม่แจ้ง ใช้กฎ 7 หมวดเดิมทั้งหมด
+EXPECTED_SHED = ''
+
+
 def check_shed(port_discharge, has_dg, has_used_engine, dest_country, shed_raw):
     """กฎ 1) SHED NO. — คืน (ok, expected, label). ok: None=ไม่มีเงื่อนไขต้องตรวจ (ไม่ใช่ 7 หมวดนี้),
-       True/False=ตรง/ไม่ตรง. เฉพาะ 7 หมวดนี้เท่านั้นที่มีเลข SHED บังคับ นอกเหนือจากนี้ไม่ตรวจ."""
+       True/False=ตรง/ไม่ตรง. เฉพาะ 7 หมวดนี้เท่านั้นที่มีเลข SHED บังคับ นอกเหนือจากนี้ไม่ตรวจ.
+       ถ้ามี EXPECTED_SHED (ผู้ใช้แจ้ง) ทุก B/L ที่ไม่ใช่ LAOS ต้องตรงกับเลขนั้นแทน."""
     pd = (port_discharge or '').upper()
     m = re.search(r'\d{3,4}', shed_raw or '')
-    actual = m.group(0) if m else ''
+    actual = m.group(0).zfill(4) if m else ''
     expected, label = '', ''
+    if EXPECTED_SHED and dest_country not in LAOS_NAMES:
+        return (actual == EXPECTED_SHED), EXPECTED_SHED, 'SHED ที่แจ้ง'
     if 'THLKR' in pd:
         expected, label = '0332', 'THLKR'
     elif 'BMT' in pd:
@@ -197,8 +205,11 @@ def compute_extra_checks(m, e):
     raw = m.get('shed_no') or ''
     if ok is None:
         out['shed'] = {'ok': None, 'text': '-', 'note': None}
+    elif ok and lbl == 'SHED ที่แจ้ง':
+        out['shed'] = {'ok': True, 'text': '-', 'note': None}   # ตรงกับที่แจ้ง → '-'
     else:
-        txt = raw + ('' if ok else f'  (ต้องเป็น {exp} — {lbl})')
+        txt = raw + ('' if ok else f'  (ต้องเป็น {exp})' if lbl == 'SHED ที่แจ้ง'
+                     else f'  (ต้องเป็น {exp} — {lbl})')
         note = None if ok else f"SHED NO. ไม่ตรง — {lbl} ต้องเป็น {exp} (MANIFEST: {raw or '(ว่าง)'})"
         out['shed'] = {'ok': ok, 'text': txt, 'note': note}
 
@@ -1743,8 +1754,10 @@ def build_report(MAN, ENT, vessel, man_declared, ent_declared, outpath):
     c3 = ws.cell(3, 1, "สี: ขาว=ไม่ผิด | เขียว=ผ่าน (ช่องสรุป) | แดง ⚠=ไม่ตรง/จุดเร่งด่วน | ส้ม=ต้องยืนยัน | "
                         "เหลือง=ไม่มี ENTER เทียบ    ||    "
                         "STATUS: CY,CY/CY,FCL,ลากตู้=CY ; LCL,ขน(ส่ง)=LCL ; CFS,LCL/CFS,เปิดตู้=LCL/CFS    ||    "
-                        "SHED NO.: USED ENGINE/LAOS=0126/0124 (เฉพาะ DISCHARGE BANGKOK), DG=2826 (เฉพาะ LAEM "
-                        "CHABANG), THLKR/BMT/SCT/UNITHAI=0332/0110/0302/0113    ||    "
+                        + (f"SHED NO.: ต้องเป็น {EXPECTED_SHED} ทุก B/L (ตรง = -) ยกเว้น LAOS=0124 "
+                           "(DISCHARGE BANGKOK)    ||    " if EXPECTED_SHED else
+                           "SHED NO.: USED ENGINE/LAOS=0126/0124 (เฉพาะ DISCHARGE BANGKOK), DG=2826 (เฉพาะ LAEM "
+                           "CHABANG), THLKR/BMT/SCT/UNITHAI=0332/0110/0302/0113    ||    ") +
                         "CARGO MOVEMENT: TRANSIT ต้องเป็น (7-TRANSIT) เสมอ ยกเว้นไปลาวต้องตรงกับ ENTER เท่านั้น")
     c3.font = Font(name=FN, size=FS, bold=True, color=DKRED)         # แถวที่ 3 = สีแดง
     c3.alignment = Alignment(wrap_text=True, vertical='center')
@@ -1785,7 +1798,11 @@ def main(argv=None):
     ap.add_argument('--enter', default=None, help='พาธไฟล์ ENTER .pdf (ค่าเริ่มต้น: หาให้อัตโนมัติ)')
     ap.add_argument('--indir', default='.', help='โฟลเดอร์ที่ใช้หาไฟล์อัตโนมัติ (ค่าเริ่มต้น: โฟลเดอร์ปัจจุบัน)')
     ap.add_argument('--outdir', default=None, help='โฟลเดอร์ผลลัพธ์ (ค่าเริ่มต้น: โฟลเดอร์เดียวกับ --indir)')
+    ap.add_argument('--shed', default='', help='SHED NO. ที่ต้องเป็นสำหรับงานนี้ เช่น 0141 (ทุก B/L ยกเว้น LAOS)')
     a = ap.parse_args(argv)
+    global EXPECTED_SHED
+    ms = re.search(r'\d{3,4}', a.shed or '')
+    EXPECTED_SHED = ms.group(0).zfill(4) if ms else ''
 
     indir = a.indir
     search_dirs = [os.path.join(indir, 'input'), indir]

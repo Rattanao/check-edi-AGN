@@ -9,3 +9,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# งานที่อัปโหลดผ่านเว็บ (ไฟล์ลูกค้าจริง)
+webapp/jobs/
+output/
+*.pdf
