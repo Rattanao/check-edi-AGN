@@ -64,10 +64,12 @@ PAGE = r"""<!doctype html>
  button,.btn{background:#1F4E78;color:#fff;border:0;border-radius:5px;padding:10px 18px;font-size:15px;cursor:pointer;text-decoration:none;display:inline-block}
  .btn.green{background:#2e7d32}
  .err{background:#FDD7D7;border-left:5px solid #c00;padding:12px}
- .stat{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
- .stat div{background:#eef3f8;border-radius:6px;padding:8px 12px;font-size:14px}
- .stat div.bad{background:#FDD7D7;font-weight:600}
- ul.crit li{margin:4px 0;color:#9c0006}
+ .stat{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+ .stat div{background:#eef3f8;border-radius:6px;padding:4px 9px;font-size:12px}
+ .stat div.bad{background:#FDD7D7;color:#e00000}
+ ul.crit{margin:6px 0;padding-left:20px}
+ ul.crit li{margin:2px 0;color:#e00000;font-size:12px}
+ .crit-h{color:#e00000;font-size:13px}
  .tbl{overflow:auto;max-height:70vh;border:1px solid #ccc}
  table{border-collapse:collapse;font-size:12px;font-family:"Aptos Narrow","Arial Narrow",Arial,sans-serif}
  th{background:#1F4E78;color:#fff;position:sticky;top:0;padding:6px;border:1px solid #fff;white-space:nowrap}
@@ -75,7 +77,7 @@ PAGE = r"""<!doctype html>
  td:first-child{min-width:200px}
  .muted{color:#666;font-size:13px}
 </style></head><body>
-<header>ตรวจเอกสารขาเข้าเรือ — MANIFEST × ENTER → EDI.xlsx</header>
+<header>ตรวจเอกสารขาเข้าเรือ — MANIFEST × ENTER → EDI→AGN</header>
 <main>
 <div class="card">
  <form method="post" action="/check" enctype="multipart/form-data">
@@ -94,9 +96,9 @@ PAGE = r"""<!doctype html>
   <a class="btn green" href="/download/{{ result.job }}">ดาวน์โหลด EDI.xlsx</a>
  </div>
  <div class="stat">
-  {% for k, v, bad in result.stats %}<div class="{{ 'bad' if bad }}">{{ k }}: {{ v }}</div>{% endfor %}
+  {% for k, v, bad in result.stats %}<div class="{{ 'bad' if bad }}">{{ k }}{% if v %}: {{ v }}{% endif %}</div>{% endfor %}
  </div>
- {% if result.crit %}<b>จุดที่ต้องตรวจสอบ</b><ul class="crit">{% for c in result.crit %}<li>{{ c }}</li>{% endfor %}</ul>
+ {% if result.crit %}<b class="crit-h">จุดที่ต้องตรวจสอบ</b><ul class="crit">{% for c in result.crit %}<li>{{ c }}</li>{% endfor %}</ul>
  {% else %}<p style="color:#2e7d32;font-weight:600">✔ ไม่พบจุดที่ต้องแก้</p>{% endif %}
 </div>
 <div class="card tbl"><table>
