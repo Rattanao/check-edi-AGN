@@ -118,7 +118,8 @@ def check_shed(port_discharge, has_dg, has_used_engine, dest_country, shed_raw):
     actual = m.group(0).zfill(4) if m else ''
     expected, label = '', ''
     if EXPECTED_SHED and dest_country not in LAOS_NAMES:
-        return (actual == EXPECTED_SHED), EXPECTED_SHED, 'SHED ที่แจ้ง'
+        # แจ้งได้หลายเลข (เช่น '0141/0121') — ตรงกับเลขใดเลขหนึ่งถือว่าผ่าน
+        return (actual in EXPECTED_SHED.split('/')), EXPECTED_SHED, 'SHED ที่แจ้ง'
     if 'THLKR' in pd:
         expected, label = '0332', 'THLKR'
     elif 'BMT' in pd:
@@ -261,7 +262,7 @@ def canon_pkg(s):
     """ชนิดบรรจุภัณฑ์มาตรฐาน — ตัดตัวเลข/รหัสย่อ/'(s)' ออก ('5 PX (PALLET(s))' -> 'PALLET')."""
     if not s:
         return ''
-    u = s.upper()
+    u = re.sub(r'\bPKGS?\b', 'PACKAGE', re.sub(r'\bCTNS?\b', 'CARTON', s.upper()))
     for w in ('WOODEN CASE', 'PALLET', 'CARTON', 'PACKAGE', 'CASE', 'BOX', 'SET', 'DRUM',
               'ROLL', 'BAG', 'BALE', 'CRATE', 'UNIT', 'PIECE', 'SKID', 'BUNDLE'):
         if w in u:
@@ -1028,6 +1029,32 @@ _LD_BL_X_MAX = 95
 _LD_MARKS_MAX, _LD_QTY_MAX, _LD_DESC_MAX, _LD_CONS_MAX = 300, 390, 545, 710
 _LD_HDR_RE = re.compile(r'^B\s*/\s*L\s*CHANGE\s*NO\.?$', re.I)
 _LD_QTY_RE = re.compile(r'^([\d,]+)\s+(.*)$')
+# ฟอนต์ไทยบางไฟล์ของ AGN ถอดข้อความออกมาเป็นอักขระแทน (เช่น '*** เร=งเป@ดตCDเขDาโกดIงด=วน ***' =
+# 'เร่งเปิดตู้เข้าโกดังด่วน') — แปลงกลับเฉพาะข้อความ STATUS ที่หัวเอกสาร (มีอักษรไทยปนอยู่) เท่านั้น
+_LD_TH_FIX = str.maketrans({'=': '่', '@': 'ิ', 'C': 'ู', 'D': '้', 'I': 'ั'})
+
+
+def _page_lines(page):
+    """คืน [(y, x, text)] ของทุกบรรทัดในหน้า — ถ้าข้อความทั้งหน้าถูกวาดแบบหมุน 90° (หน้า portrait แต่
+       เนื้อหาเป็นแนวนอน, page.rotation ยังเป็น 0 — พบใน ENTER ของ AGN บางไฟล์) จะหมุนพิกัดกลับให้เป็น
+       แนวอ่านปกติก่อน ไม่งั้นคอลัมน์ตาม x0 จะสลับเป็นแนว y ทั้งหมด."""
+    W, H = page.rect.width, page.rect.height
+    lines = [l for b in page.get_text('dict')['blocks'] for l in b.get('lines', [])]
+    dirs = Counter(tuple(round(v) for v in l['dir']) for l in lines)
+    rot = dirs.most_common(1)[0][0] if dirs else (1, 0)
+    out = []
+    for l in lines:
+        t = ''.join(s['text'] for s in l['spans']).strip()
+        if not t:
+            continue
+        x0, y0, x1, y1 = l['bbox']
+        if rot == (0, -1):      # ข้อความวิ่งจากล่างขึ้นบน → หมุนตามเข็ม 90°
+            out.append((x0, H - y1, t))
+        elif rot == (0, 1):     # ข้อความวิ่งจากบนลงล่าง → หมุนทวนเข็ม 90°
+            out.append((W - x1, y0, t))
+        else:
+            out.append((y0, x0, t))
+    return out
 
 
 def parse_enter_layout_d(doc, bl_re, ent_annot):
@@ -1035,19 +1062,37 @@ def parse_enter_layout_d(doc, bl_re, ent_annot):
        ต่างจาก layout C ตรงที่เลข B/L ย่อยพิมพ์เต็มบรรทัดเดียว (ไม่ตัดฐาน/ตัวอักษรต่อท้ายคนละบรรทัด)
        และคอลัมน์ซ้ายสุดชื่อ 'B/L CHANGE NO.' — เช็คหา anchor นี้ก่อนถึงจะเดินคอลัมน์ต่อ กันไปแมตช์มั่ว
        กับเอกสารอื่นที่ไม่ใช่เลย์เอาต์นี้จริง ๆ."""
-    has_layout = any(
-        _LD_HDR_RE.match(''.join(s['text'] for s in l['spans']).strip())
-        for p in range(doc.page_count) for b in doc[p].get_text('dict')['blocks'] for l in b.get('lines', []))
-    if not has_layout:
+    pages = [_page_lines(doc[p]) for p in range(doc.page_count)]
+    if not any(_LD_HDR_RE.match(t) for items in pages for _, _, t in items):
         return {}, 0, 0
 
+    # STATUS ที่หัวเอกสาร ('STATUS : ...') ครอบคลุมทุก B/L — ใช้เมื่อ B/L นั้นไม่มี annotation STATUS เอง
+    head_status = ''
+    for items in pages:
+        lbl = next(((y, x) for y, x, t in items if re.fullmatch(r'STATUS', t, re.I)), None)
+        if lbl:
+            val = [t for y, x, t in sorted(items, key=lambda i: i[1])
+                   if abs(y - lbl[0]) < 3 and x > lbl[1] and t != ':']
+            if val:
+                v = val[0].strip('* ').strip()
+                head_status = v.translate(_LD_TH_FIX) if re.search('[฀-๿]', v) else v
+                # ฟอนต์บางไฟล์เพี้ยนอีกแบบ ('เรรงเปปดตตเขตาโกดดงดรวน') — จับจากโครงพยัญชนะแทน
+                if re.search(r'เร.งเป.ดต.{1,2}เข.าโกด.งด.วน', head_status):
+                    head_status = 'เร่งเปิดตู้เข้าโกดังด่วน'
+            break
+
     ENT, n_anchor = {}, 0
-    for p in range(doc.page_count):
-        items = [(l['bbox'][1], l['bbox'][0], ''.join(s['text'] for s in l['spans']).strip())
-                 for b in doc[p].get_text('dict')['blocks'] for l in b.get('lines', [])]
-        items = [x for x in items if x[2]]
-        items.sort()
-        anchors = sorted((y, t) for y, x, t in items if x < _LD_BL_X_MAX and bl_re.match(t))
+    for items in pages:
+        items = sorted(i for i in items if not _PAGELN.match(i[2]))   # ตัดบรรทัด 'Page n of m' ท้ายหน้า
+        anchors = []
+        for y, x, t in items:
+            if x < _LD_BL_X_MAX and bl_re.match(t):
+                # เลข B/L ย่อยที่ยาว (เช่น '...790ZZZ' + 'ZB') ถูกตัดขึ้นบรรทัดใหม่ในคอลัมน์เดียวกัน —
+                # ต่อท่อนตัวอักษรล้วนที่อยู่ใต้ anchor ทันที (x เดียวกัน) กลับเข้าไป
+                tail = next((t2 for y2, x2, t2 in items if 0 < y2 - y < 16 and abs(x2 - x) < 4
+                             and re.fullmatch(r'[A-Z0-9]{1,4}', t2)), '')
+                anchors.append((y, t + tail))
+        anchors.sort()
         if not anchors:
             continue
         tot_y = min((y for y, x, t in items if re.match(r'^TOTAL\b', t, re.I)), default=None)
@@ -1059,7 +1104,8 @@ def parse_enter_layout_d(doc, bl_re, ent_annot):
             band = [(y, x, t) for y, x, t in items if ay - 2 <= y < y_end]
 
             marks = ' '.join(t for y, x, t in band if _LD_BL_X_MAX <= x < _LD_MARKS_MAX)
-            qty_line = next((t for y, x, t in band if _LD_MARKS_MAX <= x < _LD_QTY_MAX), '')
+            # QUANTITY อาจถูกตัดเป็น 2 บรรทัด ('203' / 'CARTONS') — ต่อทุกบรรทัดในคอลัมน์ก่อนแยกจำนวน/ชนิด
+            qty_line = ' '.join(t for y, x, t in band if _LD_MARKS_MAX <= x < _LD_QTY_MAX)
             # 'CARGO MOVEMENT n' ตัดออกจาก DESCRIPTION — เป็นรหัสศุลกากรล้วนๆ ไม่ใช่ "รายละเอียดสินค้า"
             # และมีคอลัมน์ CARGO MOVEMENT ของตัวเองอยู่แล้ว (ดึงแยกไว้ที่ ent_movement ข้างบน) เข้าเกณฑ์
             # เดียวกับที่ตัด STATUS/รหัสชนิดตู้ออกจาก DESCRIPTION (MANIFEST) ฝั่งเดียวกัน
@@ -1077,6 +1123,11 @@ def parse_enter_layout_d(doc, bl_re, ent_annot):
             gw = next((num(t) for t in gw_lines if 'KGS' in t.upper()), None)
             meas = next((num(t) for t in gw_lines if 'CBM' in t.upper() or 'M3' in t.upper()), None)
 
+            # QUANTITY แบบ '255 BAGS (7 PALLETS)' — ชนิดหีบห่อจริงคือท่อนแรก ส่วนในวงเล็บ MANIFEST พิมพ์ไว้
+            # ต้น DESCRIPTION ('(7 PALLETS) MULTIAA-ZN ...') จึงย้ายไปนำหน้า desc ให้เทียบกันได้ตรง
+            mp = re.match(r'^(.*?)\s*(\([^()]*\))\s*$', qty_line)
+            if mp and _LD_QTY_RE.match(mp.group(1)):
+                qty_line, desc = mp.group(1), f'{mp.group(2)} {desc}'
             mq = _LD_QTY_RE.match(qty_line)
             pkgs = int(mq.group(1).replace(',', '')) if mq else None
             pkgtype = mq.group(2).strip() if mq else ''
@@ -1089,7 +1140,7 @@ def parse_enter_layout_d(doc, bl_re, ent_annot):
                 'bl': bl, 'cons': cons.strip(), 'notify': notify.strip(), 'cont': cont,
                 'pkgs': pkgs, 'pkgtype': pkgtype, 'gw': gw, 'meas': meas,
                 'marks': marks.strip(), 'desc': desc.strip(),
-                'status_raw': rec.get('status', ''),
+                'status_raw': rec.get('status', '') or head_status,
                 'transit_raw': rec.get('transit', '') or (desc if TRANSIT_RE.search(desc) else ''),
                 'dg': rec.get('dg', '') or find_dg(combined),
                 'reefer': rec.get('reefer', '') or find_temp(combined),
@@ -1801,8 +1852,7 @@ def main(argv=None):
     ap.add_argument('--shed', default='', help='SHED NO. ที่ต้องเป็นสำหรับงานนี้ เช่น 0141 (ทุก B/L ยกเว้น LAOS)')
     a = ap.parse_args(argv)
     global EXPECTED_SHED
-    ms = re.search(r'\d{3,4}', a.shed or '')
-    EXPECTED_SHED = ms.group(0).zfill(4) if ms else ''
+    EXPECTED_SHED = '/'.join(x.zfill(4) for x in re.findall(r'\d{3,4}', a.shed or ''))
 
     indir = a.indir
     search_dirs = [os.path.join(indir, 'input'), indir]
@@ -1823,6 +1873,16 @@ def main(argv=None):
 
     MAN, vessel, man_declared, bl_re = parse_manifest(manifest)
     ENT, ent_declared = parse_enter(enter, bl_re)
+
+    # MANIFEST บางรายการพิมพ์จำนวน/ชนิดหีบห่อเดิมซ้ำไว้ในวงเล็บต้น DESCRIPTION ('(2 WOODEN CASES) ...')
+    # ซึ่งฝั่ง ENTER อยู่ในคอลัมน์ QUANTITY — ถ้าตรงกับ QUANTITY ของ ENTER พอดี ให้เติมวงเล็บเดียวกันนำหน้า
+    # DESC ของ ENTER เพื่อไม่ให้ถูกนับเป็น DESCRIPTION ไม่ตรง
+    _n = lambda s: re.sub(r'[^A-Z0-9]', '', str(s).upper())
+    for bl, e in ENT.items():
+        mm = re.match(r'^(\([^()]*\))\s*', (MAN.get(bl) or {}).get('desc') or '')
+        if mm and e.get('pkgs') and _n(mm.group(1)) == _n(f"{e['pkgs']}{e.get('pkgtype', '')}") \
+                and not (e.get('desc') or '').startswith('('):
+            e['desc'] = f"{mm.group(1)} {e.get('desc') or ''}".strip()
 
     if not MAN:
         sys.exit('!! อ่าน B/L จาก MANIFEST ไม่ได้เลย — ตรวจว่ารูปแบบไฟล์ตรงกับที่ parse_manifest() คาดไว้หรือไม่')

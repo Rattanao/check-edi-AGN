@@ -80,10 +80,10 @@ PAGE = r"""<!doctype html>
  <form method="post" action="/check" enctype="multipart/form-data">
   <div><label>MANIFEST (.xls / .xlsx)</label><input type="file" name="manifest" accept=".xls,.xlsx" required></div>
   <div><label>ENTER (.pdf)</label><input type="file" name="enter" accept=".pdf" required></div>
-  <div><label>SHED NO. (เช่น 0141)</label><input type="text" name="shed" value="{{ shed or '' }}" placeholder="0141" required pattern="\d{3,4}"></div>
+  <div><label>SHED NO. (เช่น 0141)</label><input type="text" name="shed" value="{{ shed or '' }}" placeholder="0141 หรือ 0141,0121" required pattern="\d{3,4}([ ,/]+\d{3,4})*"></div>
   <div><button type="submit">ตรวจสอบ</button></div>
  </form>
- <p class="muted">SHED NO.: ทุก B/L ต้องตรงกับเลขที่ใส่ (ตรง = -) ยกเว้น LAOS ใช้กฎเดิม 0124</p>
+ <p class="muted">SHED NO.: ทุก B/L ต้องตรงกับเลขที่ใส่ (ตรง = -) ใส่ได้หลายเลขคั่นด้วย , ยกเว้น LAOS ใช้กฎเดิม 0124</p>
 </div>
 {% if error %}<div class="card err">{{ error }}</div>{% endif %}
 {% if result %}
@@ -118,8 +118,8 @@ def check():
     fm, fe = request.files.get('manifest'), request.files.get('enter')
     if not fm or not fm.filename or not fe or not fe.filename:
         return render_template_string(PAGE, error='กรุณาเลือกไฟล์ MANIFEST และ ENTER ให้ครบ', shed=shed)
-    if not re.fullmatch(r'\d{3,4}', shed):
-        return render_template_string(PAGE, error='SHED NO. ต้องเป็นตัวเลข 3–4 หลัก เช่น 0141', shed=shed)
+    if not re.fullmatch(r'\d{3,4}([ ,/]+\d{3,4})*', shed):
+        return render_template_string(PAGE, error='SHED NO. ต้องเป็นตัวเลข 3–4 หลัก เช่น 0141 (หลายเลขคั่นด้วย , เช่น 0141,0121)', shed=shed)
 
     mext = os.path.splitext(fm.filename)[1].lower()
     if mext not in ('.xls', '.xlsx') or not fe.filename.lower().endswith('.pdf'):
