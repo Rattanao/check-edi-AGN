@@ -10,6 +10,7 @@ import contextlib, io, os, re, shutil, sys, threading, time, uuid
 
 from flask import Flask, abort, render_template_string, request, send_file
 import openpyxl
+import pymupdf
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
@@ -79,11 +80,11 @@ PAGE = r"""<!doctype html>
 <div class="card">
  <form method="post" action="/check" enctype="multipart/form-data">
   <div><label>MANIFEST (.xls / .xlsx)</label><input type="file" name="manifest" accept=".xls,.xlsx" required></div>
-  <div><label>ENTER (.pdf)</label><input type="file" name="enter" accept=".pdf" required></div>
-  <div><label>SHED NO. (เช่น 0141)</label><input type="text" name="shed" value="{{ shed or '' }}" placeholder="0141 หรือ 0141,0121" required pattern="\d{3,4}([ ,/]+\d{3,4})*"></div>
+  <div><label>ENTER (.pdf) — เลือกได้หลายไฟล์</label><input type="file" name="enter" accept=".pdf" multiple required></div>
+  <div><label>SHED NO. (เช่น 0141)</label><input type="text" name="shed" value="{{ shed or '' }}" placeholder="0141" required pattern="\d{3,4}"></div>
   <div><button type="submit">ตรวจสอบ</button></div>
  </form>
- <p class="muted">SHED NO.: ทุก B/L ต้องตรงกับเลขที่ใส่ (ตรง = -) ใส่ได้หลายเลขคั่นด้วย , ยกเว้น LAOS ใช้กฎเดิม 0124</p>
+ <p class="muted">SHED NO.: ทุก B/L ต้องตรงกับเลขที่ใส่ (ตรง = -) ยกเว้น LAOS ใช้กฎเดิม 0124</p>
 </div>
 {% if error %}<div class="card err">{{ error }}</div>{% endif %}
 {% if result %}
@@ -115,21 +116,28 @@ def index():
 def check():
     _cleanup()
     shed = (request.form.get('shed') or '').strip()
-    fm, fe = request.files.get('manifest'), request.files.get('enter')
-    if not fm or not fm.filename or not fe or not fe.filename:
+    fm = request.files.get('manifest')
+    fes = [f for f in request.files.getlist('enter') if f and f.filename]
+    if not fm or not fm.filename or not fes:
         return render_template_string(PAGE, error='กรุณาเลือกไฟล์ MANIFEST และ ENTER ให้ครบ', shed=shed)
-    if not re.fullmatch(r'\d{3,4}([ ,/]+\d{3,4})*', shed):
-        return render_template_string(PAGE, error='SHED NO. ต้องเป็นตัวเลข 3–4 หลัก เช่น 0141 (หลายเลขคั่นด้วย , เช่น 0141,0121)', shed=shed)
+    if not re.fullmatch(r'\d{3,4}', shed):
+        return render_template_string(PAGE, error='SHED NO. ต้องเป็นตัวเลข 3–4 หลัก เช่น 0141', shed=shed)
 
     mext = os.path.splitext(fm.filename)[1].lower()
-    if mext not in ('.xls', '.xlsx') or not fe.filename.lower().endswith('.pdf'):
+    if mext not in ('.xls', '.xlsx') or not all(f.filename.lower().endswith('.pdf') for f in fes):
         return render_template_string(PAGE, error='ชนิดไฟล์ไม่ถูกต้อง (MANIFEST ต้องเป็น .xls/.xlsx, ENTER ต้องเป็น .pdf)', shed=shed)
     job = uuid.uuid4().hex
     d = os.path.join(JOBS, job)
     os.makedirs(d)
     mp, ep = os.path.join(d, 'MANIFEST' + mext), os.path.join(d, 'ENTER.pdf')
     fm.save(mp)
-    fe.save(ep)
+    if len(fes) == 1:
+        fes[0].save(ep)
+    else:                                  # ENTER หลายไฟล์ → รวมเป็นไฟล์เดียวตามลำดับที่เลือก
+        merged = pymupdf.open()
+        for f in fes:
+            merged.insert_pdf(pymupdf.open(stream=f.read(), filetype='pdf'), annots=True)
+        merged.save(ep)
 
     buf = io.StringIO()
     with _lock:
@@ -159,7 +167,7 @@ def check():
 
     title, head, rows = _read_report(os.path.join(d, 'EDI.xlsx'))
     result = {'job': job, 'title': title, 'head': head, 'rows': rows, 'stats': stats, 'crit': crit,
-              'mname': fm.filename, 'ename': fe.filename}
+              'mname': fm.filename, 'ename': ' + '.join(f.filename for f in fes)}
     return render_template_string(PAGE, result=result, shed=shed)
 
 

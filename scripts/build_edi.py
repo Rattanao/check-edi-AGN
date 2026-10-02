@@ -118,8 +118,7 @@ def check_shed(port_discharge, has_dg, has_used_engine, dest_country, shed_raw):
     actual = m.group(0).zfill(4) if m else ''
     expected, label = '', ''
     if EXPECTED_SHED and dest_country not in LAOS_NAMES:
-        # แจ้งได้หลายเลข (เช่น '0141/0121') — ตรงกับเลขใดเลขหนึ่งถือว่าผ่าน
-        return (actual in EXPECTED_SHED.split('/')), EXPECTED_SHED, 'SHED ที่แจ้ง'
+        return (actual == EXPECTED_SHED), EXPECTED_SHED, 'SHED ที่แจ้ง'
     if 'THLKR' in pd:
         expected, label = '0332', 'THLKR'
     elif 'BMT' in pd:
@@ -1852,7 +1851,8 @@ def main(argv=None):
     ap.add_argument('--shed', default='', help='SHED NO. ที่ต้องเป็นสำหรับงานนี้ เช่น 0141 (ทุก B/L ยกเว้น LAOS)')
     a = ap.parse_args(argv)
     global EXPECTED_SHED
-    EXPECTED_SHED = '/'.join(x.zfill(4) for x in re.findall(r'\d{3,4}', a.shed or ''))
+    ms = re.search(r'\d{3,4}', a.shed or '')
+    EXPECTED_SHED = ms.group(0).zfill(4) if ms else ''
 
     indir = a.indir
     search_dirs = [os.path.join(indir, 'input'), indir]
