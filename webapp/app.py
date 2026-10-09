@@ -52,7 +52,7 @@ def _read_report(path):
 
 PAGE = r"""<!doctype html>
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ตรวจเอกสารขาเข้าเรือ</title>
+<title>Check EDI AGN</title>
 <style>
  body{font-family:"Segoe UI",Tahoma,sans-serif;margin:0;background:#f4f6f9;color:#222}
  header{background:#1F4E78;color:#fff;padding:14px 24px;font-size:20px;font-weight:600}
@@ -77,7 +77,7 @@ PAGE = r"""<!doctype html>
  td:first-child{min-width:200px}
  .muted{color:#666;font-size:13px}
 </style></head><body>
-<header>ตรวจเอกสารขาเข้าเรือ — MANIFEST × ENTER → EDI→AGN</header>
+<header>Check EDI AGN <span style="font-size:13px;font-weight:400;opacity:.85">— ตรวจเอกสารขาเข้าเรือ MANIFEST × ENTER</span></header>
 <main>
 <div class="card">
  <form method="post" action="/check" enctype="multipart/form-data">
@@ -185,5 +185,11 @@ def download(job):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print(f'เปิดเว็บที่ http://localhost:{port}  (เครื่องอื่นในวงแลน: http://<IP เครื่องนี้>:{port})')
+    import socket
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+    except OSError:
+        ip = '<IP เครื่องนี้>'
+    print(f'Check EDI AGN — เปิดที่ http://localhost:{port}  |  เพื่อนในวงแลนเปิด http://{ip}:{port}')
+    print('ปิดหน้าต่างนี้ = ปิดเว็บ')
     app.run(host='0.0.0.0', port=port, debug=False)
