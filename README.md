@@ -23,7 +23,7 @@
    DG ต้องเป็น 2826 (เฉพาะ LAEM CHABANG), THLKR/BMT/SCT/UNITHAI ต้องเป็น
    0332/0110/0302/0113
 2. **ประเทศปลายทาง** กรณี TRANSIT/TRANSSHIPMENT ต้องตรงตารางรหัสประเทศที่กำหนด (เช่น
-   LAOS→LL, MYANMAR→MM, CHINA→CN, …)
+   LAOS→LA, MYANMAR→MM, CHINA→CN, …)
 3. **CARGO MOVEMENT** — TRANSIT ไปที่อื่นต้องเป็น `(7-TRANSIT)` เสมอ ยกเว้นไปลาวที่ต้อง
    ตรงกับค่าที่ ENTER ระบุเท่านั้น
 4. **TAX ID vs NOTIFY** — ชื่อใน TAX ID ต้องตรงกับ N:/NOTIFY PARTY ของ MANIFEST

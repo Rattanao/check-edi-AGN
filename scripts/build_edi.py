@@ -86,7 +86,7 @@ def extract_transit_phrase(txt):
 # ทั้ง 4 ค่านี้พิมพ์อยู่คอลัมน์เดียวกัน (col 15 ของ MANIFEST.xls) เป็น 4 บรรทัดต่อ B/L block เรียงกัน:
 #   "1) SHED NO. 0141" / "2) ประเทศปลายทาง (TH)" / "3) CARGO MOVEMENT (7-TRANSIT)" / "4) TAX ID: (ชื่อ)"
 # ดู parse_manifest() ที่ดึงเก็บเป็น rec['shed_no']/rec['dest_code_raw']/rec['movement_raw']/rec['tax_id_raw']
-DEST_CODE = {'LAOS': 'LL', 'LAO PDR': 'LL', 'LAO': 'LL', 'MYANMAR': 'MM', 'CHINA': 'CN',
+DEST_CODE = {'LAOS': 'LA', 'LAO PDR': 'LA', 'LAO': 'LA', 'MYANMAR': 'MM', 'CHINA': 'CN',
              'MALAYSIA': 'MY', 'PHILIPPINES': 'PH', 'CAMBODIA': 'KH',
              'MARSHALL ISLAND': 'MH', 'MARSHALL ISLANDS': 'MH', 'INDIA': 'IN'}
 LAOS_NAMES = ('LAOS', 'LAO PDR', 'LAO')
@@ -218,7 +218,7 @@ def compute_extra_checks(m, e):
         out['dest'] = {'ok': None, 'text': '-', 'note': None}
     else:
         disp = f'({act})' if act else '(ว่าง)'
-        txt = disp + ('' if ok else f'  (ต้องเป็น ({exp}) — {dest_country})')
+        txt = '-' if ok else disp + f'  (ต้องเป็น ({exp}) — {dest_country})'   # ตรง → '-' เหมือน SHED
         note = None if ok else f"ประเทศปลายทางไม่ตรง — {dest_country} ต้องเป็น ({exp}) (MANIFEST: {disp})"
         out['dest'] = {'ok': ok, 'text': txt, 'note': note}
 
@@ -231,7 +231,7 @@ def compute_extra_checks(m, e):
         out['mv'] = {'ok': 'review', 'text': (raw_mv or '(ว่าง)') + '  (ต้องเทียบ ENTER)',
                      'note': 'CARGO MOVEMENT ไปลาว — ไม่พบค่า CARGO MOVEMENT ใน ENTER ของ B/L นี้ ต้องตรวจสอบด้วยคน'}
     else:
-        txt = (raw_mv or '(ว่าง)') + ('' if ok else f'  (ต้องเป็น {exp})')
+        txt = '-' if ok else (raw_mv or '(ว่าง)') + f'  (ต้องเป็น {exp})'   # ตรง → '-' เหมือน SHED
         note = None if ok else f"CARGO MOVEMENT ไม่ตรง — ต้องเป็น {exp} (MANIFEST: {raw_mv or '(ว่าง)'})"
         out['mv'] = {'ok': ok, 'text': txt, 'note': note}
 
@@ -353,8 +353,11 @@ def same_detail(a, b):
     """เทียบ MARKS/DESCRIPTION แบบเข้ม — ต่างกันแม้แต่นิดเดียวต้องเตือน.
        ยอมให้ต่างได้เฉพาะช่องว่าง/เครื่องหมายวรรคตอน (กัน MANIFEST ตัดคำขึ้นบรรทัดใหม่).
        True = ตรงกัน ; False = ไม่ตรง (เตือน) ; None = ไม่มีข้อความทั้งคู่."""
-    na = re.sub(r'[^A-Z0-9]', '', str(a or '').upper())
-    nb = re.sub(r'[^A-Z0-9]', '', str(b or '').upper())
+    # 'CARGO MOVEMENT n' เป็นรหัสศุลกากร ไม่ใช่รายละเอียดสินค้า — ENTER ตัดออกจาก DESC แต่ MANIFEST บางไฟล์พิมพ์ไว้
+    # ท้าย DESC ('*CARGO MOVEMENT 7*') จึงไม่นับในการเทียบ (ยังแสดงในเซลล์ตามต้นฉบับ)
+    mv = lambda s: re.sub(r'\*?\s*CARGO\s*MOVEMENT\s*[0-9A-Z\-]+\s*\*?', ' ', str(s or '').upper())
+    na = re.sub(r'[^A-Z0-9]', '', mv(a))
+    nb = re.sub(r'[^A-Z0-9]', '', mv(b))
     if not na and not nb:
         return None
     return na == nb

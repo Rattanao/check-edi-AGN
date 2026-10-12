@@ -43,7 +43,7 @@
   }
 
   // ───────────── 4 กฎเพิ่มเติม: SHED / ประเทศปลายทาง / CARGO MOVEMENT / TAX ID ─────────────
-  const DEST_CODE = { "LAOS": "LL", "LAO PDR": "LL", "LAO": "LL", "MYANMAR": "MM", "CHINA": "CN",
+  const DEST_CODE = { "LAOS": "LA", "LAO PDR": "LA", "LAO": "LA", "MYANMAR": "MM", "CHINA": "CN",
     "MALAYSIA": "MY", "PHILIPPINES": "PH", "CAMBODIA": "KH", "MARSHALL ISLAND": "MH", "MARSHALL ISLANDS": "MH", "INDIA": "IN" };
   const LAOS_NAMES = ["LAOS", "LAO PDR", "LAO"];
 
@@ -114,7 +114,7 @@
     if (ok === null) out.dest = { ok: null, text: "-", note: null };
     else {
       const disp = act ? `(${act})` : "(ว่าง)";
-      out.dest = { ok, text: disp + (ok ? "" : `  (ต้องเป็น (${exp}) — ${destCountry})`),
+      out.dest = { ok, text: ok ? "-" : disp + `  (ต้องเป็น (${exp}) — ${destCountry})`,
         note: ok ? null : `ประเทศปลายทางไม่ตรง — ${destCountry} ต้องเป็น (${exp}) (MANIFEST: ${disp})` };
     }
     [ok, exp, act] = checkMovement(m.transit, destCountry, m.movement_raw || "", (e || {}).movement_raw || "");
@@ -122,7 +122,7 @@
     if (ok === null) out.mv = { ok: null, text: "-", note: null };
     else if (ok === "review") out.mv = { ok: "review", text: (rawMv || "(ว่าง)") + "  (ต้องเทียบ ENTER)",
       note: "CARGO MOVEMENT ไปลาว — ไม่พบค่า CARGO MOVEMENT ใน ENTER ของ B/L นี้ ต้องตรวจสอบด้วยคน" };
-    else out.mv = { ok, text: (rawMv || "(ว่าง)") + (ok ? "" : `  (ต้องเป็น ${exp})`),
+    else out.mv = { ok, text: ok ? "-" : (rawMv || "(ว่าง)") + `  (ต้องเป็น ${exp})`,
       note: ok ? null : `CARGO MOVEMENT ไม่ตรง — ต้องเป็น ${exp} (MANIFEST: ${rawMv || "(ว่าง)"})` };
     const enterNotify = m.transit ? (e || {}).notify : null;
     let name, notify;
@@ -183,7 +183,9 @@
     return inter.length >= 2;
   }
   function sameDetail(a, b) {
-    const na = String(a || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), nb = String(b || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    // 'CARGO MOVEMENT n' เป็นรหัสศุลกากร ไม่ใช่รายละเอียดสินค้า — MANIFEST บางไฟล์พิมพ์ไว้ท้าย DESC ('*CARGO MOVEMENT 7*') ไม่นับในการเทียบ
+    const mv = s => String(s || "").toUpperCase().replace(/\*?\s*CARGO\s*MOVEMENT\s*[0-9A-Z\-]+\s*\*?/g, " ");
+    const na = mv(a).replace(/[^A-Z0-9]/g, ""), nb = mv(b).replace(/[^A-Z0-9]/g, "");
     if (!na && !nb) return null;
     return na === nb;
   }
