@@ -33,7 +33,9 @@
   }
   function extractTransitPhrase(txt) {
     if (!txt) return "";
-    const m = txt.match(/(IN\s*TRANSIT|TRANS\s?S?HIP(?:MENT)?)/i);
+    txt = txt.replace(/\bLAO\s*P\.?\s*D\.?\s*R\.?/gi, "LAO PDR");   // the dots in P.D.R. are not a sentence end
+    // prefer TRANSHIPMENT when a sentence has both words — matches the 3-TRANSHIPMENT rule
+    const m = txt.match(/(TRANS[\s-]?S?HIP(?:MENT)?)/i) || txt.match(/(IN\s*TRANSIT)/i);
     if (!m) return txt.replace(/\s+/g, " ").trim();
     const kw = m[1].toUpperCase().replace(/ /g, "").includes("TRANSIT") ? "INTRANSIT" : "TRANSHIPMENT";
     const rest = txt.slice(m.index + m[0].length);
@@ -78,9 +80,12 @@
     const actual = m ? m[1].toUpperCase() : "";
     return [actual === expected, expected, actual];
   }
-  function checkMovement(transitText, destCountry, mvManifest, mvEnter) {
-    if (!transitText) return [null, "", ""];
+  // TRANSHIPMENT (in MANIFEST or ENTER) must always be 3-TRANSHIPMENT, any destination incl. Laos — checked before the INTRANSIT rules
+  const TRANSHIP_RE = /TRANS[\s-]?S?HIP/i;
+  function checkMovement(transitText, destCountry, mvManifest, mvEnter, enterTransit) {
     const mv = (mvManifest || "").trim().toUpperCase();
+    if (TRANSHIP_RE.test(transitText || "") || TRANSHIP_RE.test(enterTransit || "")) return [mv.startsWith("3"), "3-TRANSHIPMENT", mv];
+    if (!transitText) return [null, "", ""];
     if (LAOS_NAMES.includes(destCountry)) {
       const exp = (mvEnter || "").trim().toUpperCase();
       if (!exp) return ["review", "", mv];
@@ -117,7 +122,7 @@
       out.dest = { ok, text: ok ? "-" : disp + `  (ต้องเป็น (${exp}) — ${destCountry})`,
         note: ok ? null : `ประเทศปลายทางไม่ตรง — ${destCountry} ต้องเป็น (${exp}) (MANIFEST: ${disp})` };
     }
-    [ok, exp, act] = checkMovement(m.transit, destCountry, m.movement_raw || "", (e || {}).movement_raw || "");
+    [ok, exp, act] = checkMovement(m.transit, destCountry, m.movement_raw || "", (e || {}).movement_raw || "", (e || {}).transit_raw || "");
     const rawMv = m.movement_raw || "";
     if (ok === null) out.mv = { ok: null, text: "-", note: null };
     else if (ok === "review") out.mv = { ok: "review", text: (rawMv || "(ว่าง)") + "  (ต้องเทียบ ENTER)",
@@ -184,7 +189,7 @@
   }
   function sameDetail(a, b) {
     // 'CARGO MOVEMENT n' เป็นรหัสศุลกากร ไม่ใช่รายละเอียดสินค้า — MANIFEST บางไฟล์พิมพ์ไว้ท้าย DESC ('*CARGO MOVEMENT 7*') ไม่นับในการเทียบ
-    const mv = s => String(s || "").toUpperCase().replace(/\*?\s*CARGO\s*MOVEMENT\s*[0-9A-Z\-]+\s*\*?/g, " ");
+    const mv = s => String(s || "").toUpperCase().replace(/\*?\s*CARGO\s*MOVEMENT\s*[:=]?\s*[0-9A-Z][0-9A-Z\-]*\s*\*?/g, " ");
     const na = mv(a).replace(/[^A-Z0-9]/g, ""), nb = mv(b).replace(/[^A-Z0-9]/g, "");
     if (!na && !nb) return null;
     return na === nb;
@@ -236,6 +241,8 @@
     const declared = {};
     const MAN = {};
     const END = /^(PORT TOTAL|GRAND TOTAL|TOTAL\b|PortOfDischarge)/i;
+    // MARKS / DESCRIPTION (col 10) use a stricter end marker: real cargo text can start with TOTAL (e.g. marks "TOTAL 4 CTNS ONLY")
+    const END_CARGO = /^(PORT TOTAL|GRAND TOTAL|TOTAL\s*(PACK|GROSS\s*WEIGHT|MEASUREMENT)\b|PortOfDischarge)/i;
     const ST_TOK = ["CY/CY", "CY-CY", "LCL/CFS", "CFS/CFS", "FCL/CFS", "CY", "LCL", "CFS", "FCL"];
     const pdAt = new Array(n).fill("");
     let curPd = "";
@@ -275,7 +282,7 @@
       while (j < n) {
         const a = cell(rows[j], 0);
         if (blRe.test(a)) break;
-        if (rows[j].some((_, k) => END.test(cell(rows[j], k)))) { j++; break; }
+        if (rows[j].some((_, k) => (k === MARKS_COL || k === 10 ? END_CARGO : END).test(cell(rows[j], k)))) { j++; break; }
         const numbered = /^[123]\./.test(a);
         if (a.startsWith("C :")) rec.cons = a.slice(3).trim();
         else if (a.startsWith("N :")) rec.notify = a.slice(3).trim();
@@ -298,7 +305,7 @@
           if (DG_RE.test(c10) || REEFER_RE.test(c10)) rec.desc.push(c10);
           else if (transitOpen || TRANSIT_RE.test(u)) { rec.transit = (rec.transit + " " + c10).trim(); transitOpen = true; rec.desc.push(c10); }
           else if (ST_TOK.includes(u) && !rec.status) rec.status = c10;
-          else if (/^\d{0,2}[A-Z]\d[A-Z0-9]/.test(u) || u.includes("PART CNTR") || /^[\d,]+\s*(PK|CS|PX|CT|BX|SX|BE|DR|RO|BG)\b/.test(u)) { /* โครงสร้าง */ }
+          else if (/^\d{0,2}[A-Z]\d[A-Z0-9]{1,3}(?:\s|$)/.test(u) || u.includes("PART CNTR") || /^[\d,]+\s*(PK|CS|PX|CT|BX|SX|BE|DR|RO|BG)\b/.test(u)) { /* โครงสร้าง */ }
           else rec.desc.push(c10);
         }
         const c16 = cell(rows[j], 16);
@@ -329,7 +336,7 @@
   const PAGELN = /^Page \d+ of \d+$/;
   const HDR_RE = /^B\s*\/\s*L\s*CHANGE\s*NO\.?$/i;
   const QTY_RE = /^([\d,]+)\s+(.*)$/;
-  const MOVE_RE = /^CARGO\s*MOVEMENT\s*([0-9A-Za-z\-]+)$/i;
+  const MOVE_RE = /^CARGO\s*MOVEMENT\s*[:=]?\s*([0-9A-Za-z][0-9A-Za-z\-]*)$/i;
   // ฟอนต์ไทยของ AGN บางไฟล์ถอดออกมาเป็นอักขระแทน ('เร=งเป@ดตCD…' = 'เร่งเปิดตู้…') — แปลงกลับเฉพาะ STATUS หัวเอกสาร
   const TH_FIX = { "=": "่", "@": "ิ", "C": "ู", "D": "้", "I": "ั" };
 
@@ -683,8 +690,14 @@
     if (entDecl && Object.keys(entDecl).length) dbits.push("ENTER: " + dtxt(entDecl));
     if (manDecl && Object.keys(manDecl).length) dbits.push("MANIFEST(GRAND TOTAL): " + dtxt(manDecl));
     const declTxt = dbits.length ? "ยอดที่ระบุในเอกสาร — " + dbits.join("  |  ") + "  ||  " : "";
+    // totals equal but other flags (TRANSIT/DG/...) — say what it is instead of "ยอดรวมไม่ตรง"
+    const flags = [["st_bad", "STATUS ไม่ตรง"], ["transit", "TRANSIT"], ["dg", "DG"], ["reefer", "REEFER"], ["shed_bad", "SHED ไม่ตรง"],
+      ["dest_bad", "ปลายทางไม่ตรง"], ["mv_bad", "MOVEMENT ไม่ตรง"], ["mv_review", "MOVEMENT ต้องตรวจ"], ["tax_bad", "TAX ID ไม่ตรง"]]
+      .filter(([k]) => TOT[k]).map(([k, l]) => `${l} ${TOT[k]} B/L`);
     const T = {
-      urgent: allOk ? `${OK} ยอดรวม ENTER = MANIFEST` : `${WARN} ยอดรวมไม่ตรง — ตรวจด่วน`, bl: "TOTAL / ยอดรวม",
+      urgent: allOk ? `${OK} ยอดรวม ENTER = MANIFEST`
+        : (peOk && geOk && meOk) ? `${WARN} ยอดรวมตรงกัน แต่มีจุดต้องตรวจ: ${flags.join(", ")}`
+        : `${WARN} ยอดรวมไม่ตรง — ตรวจด่วน`, bl: "TOTAL / ยอดรวม",
       cneeE: `${na} B/L ย่อย`, cneeM: `${na} B/L ย่อย`, tax: `TAX ID ไม่ตรง ${TOT.tax_bad} B/L`,
       cntE: `${Object.keys(TOT.cte).length} ตู้: ${ct(TOT.cte)}`, cntM: `${Object.keys(TOT.ctm).length} ตู้: ${ct(TOT.ctm)}`,
       stE: `STATUS ไม่ตรง ${TOT.st_bad} B/L`, stM: `STATUS ไม่ตรง ${TOT.st_bad} B/L`,
@@ -709,7 +722,7 @@
 
     const masterBl = sub.length ? sub.slice().sort((a, b) => a.length - b.length)[0] : "";
     return { rows, total: { cells: tcells }, crit, issueRows, count: na, vessel, masterBl, TOT,
-      stats: { bl: na, issue_rows: issueRows, allOk }, expectedShed: exShed };
+      stats: { bl: na, issue_rows: issueRows, allOk, totalsOk: peOk && geOk && meOk }, expectedShed: exShed };
   }
 
   // ───────────── อ่าน PDF ด้วย pdf.js → pages [{items:[{x,y,t}], annots:[{y,text}]}] ─────────────
