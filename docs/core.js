@@ -143,9 +143,9 @@
     SX: "SET", DR: "DRUM", RO: "ROLL", RL: "ROLL", BG: "BAG", BE: "BALE", BL: "BALE", CR: "CRATE", UN: "UNIT", PC: "PIECE" };
   function canonPkg(s) {
     if (!s) return "";
-    const u = String(s).toUpperCase().replace(/\bCTNS?\b/g, "CARTON").replace(/\bPKGS?\b/g, "PACKAGE");
+    const u = String(s).toUpperCase().replace(/\bCTNS?\b/g, "CARTON").replace(/\bPKGS?\b/g, "PACKAGE").replace(/\bPLTS?\b/g, "PALLET");
     for (const w of ["WOODEN CASE", "PALLET", "CARTON", "PACKAGE", "CASE", "BOX", "SET", "DRUM", "ROLL", "BAG", "BALE", "CRATE", "UNIT", "PIECE", "SKID", "BUNDLE"])
-      if (u.includes(w)) return w === "WOODEN CASE" ? "CASE" : w;
+      if (u.includes(w)) return w;   // WOODEN CASE ≠ CASE — ต้องแจ้งเตือนเมื่อฝั่งหนึ่งเป็นลังไม้ อีกฝั่งเป็น CASE
     let m = u.match(/^\s*[\d,]*\s*([A-Z]{2,3})\b/);
     if (m && PKG_KIND[m[1]]) return PKG_KIND[m[1]];
     m = u.match(/\(([A-Z]+?)\(S\)\)/) || u.match(/\(([A-Z ]+?)\)/);
@@ -377,12 +377,14 @@
         anchors.push({ bl: it.t + (tail ? tail.t : ""), y: it.y });
       }
       anchors.sort((a, b) => a.y - b.y);
-      const totIt = items.find(it => /^TOTAL\b/i.test(it.t));
+      // แถวยอดรวมท้ายตาราง 'TOTAL 205 PACKAGES' — ต้องมีตัวเลขตามหลัง ไม่งั้นไปตัดที่ MARKS 'TOTAL QUANTITY:'
+      const totIt = items.find(it => /^TOTAL\s+[\d,.]+\s/i.test(it.t));
       anchors.forEach((a, k) => {
         nAnchor++;
         let yEnd = k + 1 < anchors.length ? anchors[k + 1].y : Infinity;
         if (totIt && a.y < totIt.y && totIt.y < yEnd) yEnd = totIt.y;
-        blocks.push({ bl: a.bl, band: items.filter(it => it.y >= a.y - 2 && it.y < yEnd) });
+        // เผื่อ 2 pt ทั้งต้นและท้ายบล็อก — บรรทัดแรกของบล็อกถัดไปอยู่ y เดียวกับเลข B/L ของมัน ต่างกันแค่ทศนิยม
+        blocks.push({ bl: a.bl, band: items.filter(it => it.y >= a.y - 2 && it.y < yEnd - 2) });
       });
       pg.anchors = anchors;
     });
@@ -448,6 +450,16 @@
     const trusted = success >= 1 && nAnchor > 0 && success / nAnchor >= 0.5;
     for (const r of Object.values(ENT)) r.low_confidence = !trusted;
     return { ENT, declared: {} };
+  }
+
+  // กฎผู้ใช้: แจ้งผลเฉพาะ B/L ที่มีในเอกสาร ENTER — B/L อื่นใน M/F (MANIFEST ทั้งลำเรือ) ไม่ต้องลงผลการตรวจ
+  // (B/L ที่มีใน ENTER แต่ไม่มีใน M/F ยังขึ้นแถวแดงวิกฤตตามเดิม) คืน { MAN, hidden }
+  function filterToEnterMasters(MAN, ENT) {
+    if (!Object.keys(ENT).length) return { MAN, hidden: [] };
+    const hidden = Object.keys(MAN).filter(b => !(b in ENT)).sort();
+    const out = {};
+    for (const [b, r] of Object.entries(MAN)) if (b in ENT) out[b] = r;
+    return { MAN: out, hidden };
   }
 
   // MANIFEST บางรายการพิมพ์จำนวน/ชนิดหีบห่อซ้ำในวงเล็บต้น DESCRIPTION ('(2 WOODEN CASES) ...') ซึ่ง ENTER อยู่ในคอลัมน์
@@ -550,7 +562,7 @@
       mk(["tpE", "tpM"], pkOk);
       if (!pkOk) notes.push(`TOTAL PACKAGE ไม่ตรง (ENTER ${pe !== null ? pe : "-"} / MANIFEST ${pm !== null ? pm : "(ไม่มี)"})`);
       const ke = canonPkg(e.pkgtype), km = canonPkg(m.pkg_hdr);
-      const pgOk = !!(ke && km && (ke === km || km.includes(ke) || ke.includes(km)));
+      const pgOk = !!(ke && km && (ke === km || ((km.includes(ke) || ke.includes(km)) && ke.includes("WOODEN") === km.includes("WOODEN"))));
       mk(["pkE", "pkM"], pgOk);
       if (!pgOk) notes.push(`PACKAGING ไม่ตรง (ENTER ${ke || e.pkgtype || "-"} / MANIFEST ${km || m.pkg_hdr || "(ไม่มี)"})`);
 
@@ -779,6 +791,6 @@
     return pages;
   }
 
-  root.CheckAGN = { pdfPages, HEADERS, KEYS, NUMKEYS, WIDEKEYS, parseManifest, parseEnter, isAgnAmendment, buildReport, WARN, OK,
+  root.CheckAGN = { pdfPages, HEADERS, KEYS, NUMKEYS, WIDEKEYS, parseManifest, parseEnter, isAgnAmendment, filterToEnterMasters, buildReport, WARN, OK,
     _t: { canonPkg, canonStatus, normCo, comatch, sameDetail, extractTransitPhrase, findDestCountry } };
 })(typeof window !== "undefined" ? window : globalThis);

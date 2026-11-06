@@ -176,8 +176,11 @@ function run() {
     if (notAgn.length) { $("msg").textContent = "ไฟล์นี้ไม่ใช่ฟอร์ม AMENDMENT ของ AGN (ไม่พบหัวตาราง 'B/L CHANGE NO.') — หน้านี้รองรับเฉพาะ AGN:\n" + notAgn.join("\n"); return; }
     const { ENT, declared: entDecl } = C.parseEnter(enters.flatMap(f => f.pages), blRe);
     if (!Object.keys(ENT).length) { $("msg").textContent = "อ่าน B/L จาก ENTER ไม่ได้ — เลข B/L ใน ENTER ไม่ตรงกับรูปแบบเลข B/L ใน MANIFEST"; return; }
-    report = C.buildReport(MAN, ENT, vessel, declared, entDecl, { expectedShed: $("shed").value });
+    // แจ้งผลเฉพาะ B/L ที่มีใน ENTER — B/L อื่นใน M/F ไม่ลงผล (GRAND TOTAL ทั้งลำใช้เทียบไม่ได้)
+    const f = C.filterToEnterMasters(MAN, ENT);
+    report = C.buildReport(f.MAN, ENT, vessel, f.hidden.length ? {} : declared, entDecl, { expectedShed: $("shed").value });
     renderResult();
+    if (f.hidden.length) $("msg").textContent = `แสดงเฉพาะ B/L ที่มีใน ENTER — ไม่ลงผล B/L อื่นใน M/F ${f.hidden.length} ใบ`;
   } catch (err) {
     $("msg").textContent = "เกิดข้อผิดพลาด: " + err.message;
     console.error(err);
