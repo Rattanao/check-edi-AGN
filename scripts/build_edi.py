@@ -2413,6 +2413,13 @@ def build_report(MAN, ENT, vessel, man_declared, ent_declared, outpath):
     TOT = {'pe': 0, 'pm': 0, 'ge': 0.0, 'gm': 0.0, 'me': 0.0, 'mm': 0.0,
            'pke': {}, 'pkm': {}, 'cte': {}, 'ctm': {}, 'st_bad': 0, 'transit': 0, 'dg': 0, 'reefer': 0,
            'shed_bad': 0, 'dest_bad': 0, 'mv_bad': 0, 'mv_review': 0, 'tax_bad': 0}
+    # กฎ: แจ้งผลเฉพาะ B/L ที่มีใน ENTER — B/L อื่นของ M/F ทั้งลำเรือไม่ลงผล และไม่ใช้ GRAND TOTAL ทั้งลำ
+    # (B/L ที่มีใน ENTER แต่ไม่มีใน MANIFEST ยังแจ้งวิกฤตเหมือนเดิม)
+    _skipped_mf = [b for b in MAN if b not in ENT]
+    if _skipped_mf:
+        MAN = {b: r for b, r in MAN.items() if b in ENT}
+        man_declared = None
+        print(f'ไม่ลงผล B/L ของ MANIFEST ที่ไม่มีใน ENTER {len(_skipped_mf)} B/L')
     sub = sorted(MAN, key=lambda b: (len(b), b))
 
     for bl in sub:
